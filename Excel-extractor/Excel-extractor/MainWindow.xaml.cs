@@ -24,6 +24,10 @@ namespace Excel_extractor {
         private Excel.Application app;
         private Excel.Workbook wb;
         private Excel.Worksheet downMLT;
+        private string[] headers = { "Project Number", "Name Project", "RP", "Phase", "Departement", "Resp. tâche", "Month/Year", "Hours" };
+        private List<string[]> data = new List<string[]>();
+        private int begin_index = 2;
+        private int total_entries = 0;
 
         private void MainWindow_Load(object sender, EventArgs e) {
             //if (!CheckDatabaseExist()) {
@@ -114,20 +118,19 @@ namespace Excel_extractor {
 
         private void TraiterFichiers() {
 
-            int k = 2;
             object objOpt = Missing.Value;
 
-            downMLT.Cells[1, 1] = "Project Number";
-            downMLT.Cells[1, 2] = "Name Project";
-            downMLT.Cells[1, 3] = "RP";
-            downMLT.Cells[1, 4] = "Phase";
-            downMLT.Cells[1, 5] = "Departement";
-            downMLT.Cells[1, 6] = "Resp. tâche";
-            downMLT.Cells[1, 7] = "Month/Year";
-            downMLT.Cells[1, 8] = "Hours";
+            //downMLT.Cells[1, 1] = "Project Number";
+            //downMLT.Cells[1, 2] = "Name Project";
+            //downMLT.Cells[1, 3] = "RP";
+            //downMLT.Cells[1, 4] = "Phase";
+            //downMLT.Cells[1, 5] = "Departement";
+            //downMLT.Cells[1, 6] = "Resp. tâche";
+            //downMLT.Cells[1, 7] = "Month/Year";
+            //downMLT.Cells[1, 8] = "Hours";
 
-            Excel.Range rg = downMLT.Cells[2, 7];
-            rg.EntireColumn.NumberFormat = "mmm-yy";
+            //Excel.Range rg = downMLT.Cells[2, 7];
+            //rg.EntireColumn.NumberFormat = "mmm-yy";
 
             foreach (string fichier in FichierATraiter) {
 
@@ -141,11 +144,11 @@ namespace Excel_extractor {
                     var fichierMod = Path.ChangeExtension(fichier, ".xlsx");
                     File.Move(fichier, fichierMod);
                     xlWorkbook = xlApp.Workbooks.Open(fichierMod, objOpt, true, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt);
-                } else if(ext == ".xlsx"){
+                } else if (ext == ".xlsx") {
                     xlWorkbook = xlApp.Workbooks.Open(fichier, objOpt, true, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt);
                 }
 
-                if(xlWorkbook == null) {
+                if (xlWorkbook == null) {
                     continue;
                 }
 
@@ -153,55 +156,69 @@ namespace Excel_extractor {
                 try {
                     int yearCol = 0;
 
-                    for(int i = 1; i < 20; i++) {
-                        if(xlWorksheet.Cells[i, 7].Value2 != null && xlWorksheet.Cells[i,7].Value2.ToString() != "") {
-                            yearCol = i;
+                    for (int i = 1; i < 20; i++) {
+                        if (xlWorksheet.Cells[i, 7].Value2 != null && xlWorksheet.Cells[i, 7].Value2.ToString() != "") {
+                            yearCol = i + 2;
                             break;
                         }
                     }
+                    Debug.WriteLine("year col");
+                    Debug.WriteLine(yearCol);
 
                     int nbCol = 6 + (int)xlApp.WorksheetFunction.CountA(xlWorksheet.get_Range((Excel.Range)xlWorksheet.Cells[yearCol, 7], (Excel.Range)xlWorksheet.Cells[yearCol, 95]));
-                    int nbRow = (int)xlApp.WorksheetFunction.CountA(xlWorksheet.get_Range((Excel.Range)xlWorksheet.Cells[yearCol+5, 5], (Excel.Range)xlWorksheet.Cells[1000, 5]));
-                    string projectNumber = "";
-                    string projectName = "";
+                    //int nbRow = (int)xlApp.WorksheetFunction.CountA(xlWorksheet.get_Range((Excel.Range)xlWorksheet.Cells[yearCol + 1, 5], (Excel.Range)xlWorksheet.Cells[1000, 5]));
+                    //int nbCol = 43;
+                    int nbRow = xlWorksheet.Cells[xlWorksheet.Rows.Count, 2].End(Excel.XlDirection.xlUp).Row;
+                    Debug.WriteLine("nb col");
+                    Debug.WriteLine(nbCol);
+                    Debug.WriteLine("nb row");
+                    Debug.WriteLine(nbRow);
+
+                    string projectNumber = xlWorksheet.Cells[1, 2].Value2 + "";
+                    string projectName = xlWorksheet.Cells[2, 2].Value2 + "";
                     string metier = "";
                     string resp = "";
                     string mois_annee_str = "";
                     double heures = 0;
 
-                    projectNumber = xlWorksheet.Cells[1, 2].Value2 + "";
-                    projectName = xlWorksheet.Cells[2, 2].Value2 + "";
+                    for (int i = yearCol + 1; i <= nbRow; i++) {
+                        // TODO: Vérifier si on va bien jusqu'à la fin des rows
+                        // La façon dont les rows sont calculés à changé, donc mtn les rows sont bons
+                        // Il faut changer la façon dont les colums sont évaluées, aller de G à AQ tout le temps et check pour des cases vides
+                        // TODO: Vérifier quelles opérations prennent du temps => optimisation nécessaire car procesus trop long (pour 3 fichiers seulement)
+                        if (xlWorksheet.Cells[i, 2].Value2 != "Code") {
+                            string dep = xlWorksheet.Cells[i, 6].Value2 + "";
+                            if (dep == "" || dep == "S Hours" || dep.Contains("h")) {
+                                continue;
+                            }
+                            if ((int.Parse(xlWorksheet.Cells[i, 6].Value2.ToString())) > 0) {
+                                metier = xlWorksheet.Cells[i, 2].Value2 + "";
+                                resp = xlWorksheet.Cells[i, 3].Value2 + "";
 
-                    //nbRow--;
-                    for (int i = yearCol+5; i <= nbRow; i++) {
-                        string dep = xlWorksheet.Cells[i, 6].Value2 + "";
-                        if(dep == "" || dep == "S Hours" || dep.Contains("h")) {
-                            continue;
-                        }
-                        if ((Int32.Parse(xlWorksheet.Cells[i, 6].Value2.ToString())) > 0) {
-                            metier = xlWorksheet.Cells[i, 2].Value2 + "";
-                            resp = xlWorksheet.Cells[i, 3].Value2 + "";
-
-                            for (int j = 7; j < nbCol; j++) {
-                                if (xlWorksheet.Cells[i, j].Value2 > 0) {
-                                    mois_annee_str = xlWorksheet.Cells[yearCol+2, j].Value2.ToString();
-                                    double date = double.Parse(mois_annee_str);
-                                    var mois_annee = DateTime.FromOADate(date).ToString("dd/MM/yyyy");
-                                    heures = xlWorksheet.Cells[i, j].Value2;
-                                    Debug.WriteLine(heures);
-                                    downMLT.Cells[k, 1] = projectNumber;
-                                    downMLT.Cells[k, 2] = projectName;
-                                    //downMLT.Cells[k, 3] = RP;
-                                    downMLT.Cells[k, 3] = "";
-                                    downMLT.Cells[k, 5] = metier;
-                                    downMLT.Cells[k, 6] = resp;
-                                    downMLT.Cells[k, 7] = mois_annee;
-                                    downMLT.Cells[k, 8] = heures;
-                                    k++;
+                                for (int j = 7; j < nbCol; j++) {
+                                    if (xlWorksheet.Cells[i, j].Value2 > 0) {
+                                        mois_annee_str = xlWorksheet.Cells[yearCol + 2, j].Value2.ToString();
+                                        double date = double.Parse(mois_annee_str);
+                                        var mois_annee = DateTime.FromOADate(date).ToString("dd/MM/yyyy");
+                                        heures = xlWorksheet.Cells[i, j].Value2;
+                                        //Debug.WriteLine(heures);
+                                        data.Add(new string[] { projectNumber, projectName, "", metier, resp, mois_annee, heures.ToString() });
+                                        //downMLT.Cells[k, 1] = projectNumber;
+                                        //downMLT.Cells[k, 2] = projectName;
+                                        ////downMLT.Cells[k, 3] = RP;
+                                        //downMLT.Cells[k, 3] = "";
+                                        //downMLT.Cells[k, 5] = metier;
+                                        //downMLT.Cells[k, 6] = resp;
+                                        //downMLT.Cells[k, 7] = mois_annee;
+                                        //downMLT.Cells[k, 8] = heures;
+                                        total_entries++;
+                                    }
                                 }
                             }
                         }
                     }
+                    Debug.WriteLine("Total entries");
+                    Debug.WriteLine(total_entries);
                 } catch (Exception ex) {
                     Debug.WriteLine(ex);
                     throw new Exception(ex.Message);
@@ -213,6 +230,27 @@ namespace Excel_extractor {
                     Marshal.ReleaseComObject(xlApp);
                 }
             }
+            // Effectuer toutes les écritures à la fin
+            //HEADERS
+            for (int i = 1; i <= 8; i++) {
+                downMLT.Cells[1, i] = headers[i - 1];
+            }
+
+            Excel.Range rg = downMLT.Cells[2, 7];
+            rg.EntireColumn.NumberFormat = "mmm-yy";
+
+            //CONTENU
+            int counter = 0;
+            foreach (string[] row in data) {
+                for (int i = 1; i < row.Length; i++) {
+                    downMLT.Cells[begin_index + counter, i] = row[i - 1];
+                }
+                downMLT.Cells[begin_index + counter, row.Length] = Double.Parse(row[row.Length - 1]);
+                counter++;
+            }
+            Debug.WriteLine(total_entries);
+            Debug.WriteLine(counter);
+
             downMLT.Name = "down MLT";
             wb.SaveAs(output.Text + "\\MLT.xlsm", Excel.XlFileFormat.xlOpenXMLWorkbookMacroEnabled, objOpt, objOpt, objOpt, objOpt, Excel.XlSaveAsAccessMode.xlNoChange, objOpt, objOpt, objOpt, objOpt, objOpt);
             System.Windows.MessageBox.Show("Conversion terminée");
@@ -236,7 +274,6 @@ namespace Excel_extractor {
             //Obtenir des fichiers au lieu de string
             //Mettre les fichiers dans une list
             //Trier et prendre le premier
-
             var dir = new DirectoryInfo(projet);
             FileInfo[] files = dir.GetFiles();
             if (files.Length == 0) {
