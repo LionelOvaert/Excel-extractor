@@ -1,13 +1,13 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Data.SqlClient;
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Forms;
 using Excel = Microsoft.Office.Interop.Excel;
@@ -25,53 +25,15 @@ namespace Excel_extractor {
         private Excel.Application app;
         private Excel.Workbook wb;
         private Excel.Worksheet downMLT;
-        private string[] headers = { "Project Number", "Name Project", "RP", "Phase", "Departement", "Resp. tâche", "Month/Year", "Hours" };
-        private List<string[]> data = new List<string[]>();
+        private List<string> headers = new List<string> { "Project Number", "Name Project", "RP", "Phase", "Departement", "Resp. tâche", "Month/Year", "Hours", "Coût restimé", "Revenus estimés total", "Honoraires", "Cout final", "Cout actuel", "Fae", "Commentaire" };
+        private List<List<string>> data = new List<List<string>>();
         private int begin_index = 1;
         private int total_entries = 0;
+        private string selectedFolderType = "RFP";
 
         private void MainWindow_Load(object sender, EventArgs e) {
-            //if (!CheckDatabaseExist()) {
-            //    GenerateDatabase();
-            //}
+
         }
-
-        //private void GenerateDatabase() {
-        //    List<string> cmds = new List<string>();
-        //    if (File.Exists(System.Windows.Forms.Application.StartupPath + "\\Script.sql")) {
-        //        TextReader tr = new StreamReader(System.Windows.Forms.Application.StartupPath + "\\Script.sql");
-        //        string line = "";
-        //        string cmd = "";
-        //        while ((line = tr.ReadLine()) != null) {
-        //            if (line.Trim().ToUpper() == "GO") {
-        //                cmds.Add(cmd);
-        //                cmd = "";
-        //            } else {
-        //                cmd += line + "\r\n";
-        //            }
-        //        }
-        //        if (cmds.Count > 0) {
-        //            SqlCommand command = new SqlCommand();
-        //            command.Connection = new SqlConnection(@"Data Source=.\sqlexpress;Initial Catalog=MASTER;Integrated Security=True");
-        //            command.CommandType = System.Data.CommandType.Text;
-        //            command.Connection.Open();
-        //            for (int i = 0; i < cmds.Count; i++) {
-        //                command.CommandText = cmds[i];
-        //                command.ExecuteNonQuery();
-        //            }
-        //        }
-        //    }
-        //}
-
-        //private bool CheckDatabaseExist() {
-        //    SqlConnection Connection = new SqlConnection(@"Data Source=.\sqlexpress;Initial Catalog=Projets;Integrated Security=True");
-        //    try {
-        //        Connection.Open();
-        //        return true;
-        //    } catch {
-        //        return false;
-        //    }
-        //}
 
         private void Selection_Click(object sender, RoutedEventArgs e) {
             Fbd = new FolderBrowserDialog();
@@ -92,17 +54,43 @@ namespace Excel_extractor {
         }
 
         private void Conversion_Click(object sender, RoutedEventArgs e) {
+            //this.convert_progress.Visibility = Visibility.Visible;
             if (input_folder == null) {
                 return;
             }
-            string[] metiers = Directory.GetDirectories(input_folder);
-            foreach (string metier in metiers) {
-                TraiterMetier(metier);
+
+            this.convert_percentage.Visibility = Visibility.Visible;
+            var type = this.folderType.SelectedItem as string;
+
+            switch (type) {
+                case "RFP":
+                    TraiterRFP(input_folder);
+                    break;
+                case "Métier":
+                    TraiterMetier(input_folder);
+                    break;
+                case "Responsable":
+                    TraiterResponsable(input_folder);
+                    break;
+                case "Projet":
+                    TraiterProjet(input_folder);
+                    Debug.WriteLine(FichierATraiter.Count);
+                    break;
             }
+
+            //this.convert_progress.Minimum = 1;
+            //this.convert_progress.Maximum = this.FichierATraiter.Count;
+
             app = new Excel.Application();
             wb = app.Workbooks.Add(Missing.Value);
             downMLT = (Excel.Worksheet)wb.Worksheets.get_Item(1);
             try {
+                //BackgroundWorker worker = new BackgroundWorker();
+                //worker.WorkerReportsProgress = true;
+                //worker.DoWork += TraiterFichiers;
+                //worker.ProgressChanged += worker_ProgressChanged;
+
+                //worker.RunWorkerAsync();
                 TraiterFichiers();
             } catch (Exception ex) {
                 Debug.WriteLine(ex);
@@ -117,19 +105,25 @@ namespace Excel_extractor {
 
         }
 
-        private void TraiterFichiers() {
+        private void TraiterFichiers(/*object sender, DoWorkEventArgs e*/) {
 
             object objOpt = Missing.Value;
+            int fichierCourant = 0;
 
             foreach (string fichier in FichierATraiter) {
+                fichierCourant += 1;
+                this.convert_percentage.Text = fichierCourant + "/" + this.FichierATraiter.Count;
+                //(sender as BackgroundWorker).ReportProgress(fichierCourant);
 
                 Debug.WriteLine(fichier);
                 Excel.Application xlApp = null;
                 Excel.Workbook xlWorkbook = null;
                 Excel._Worksheet xlWorksheet = null;
+                Excel._Worksheet xlWorksheetRecap = null;
                 try {
                     xlApp = new Excel.Application();
 
+                    // A supprimer normalement car on flagera le fichier comme une erreur!
                     string ext = Path.GetExtension(fichier);
                     if (Path.GetExtension(fichier) == ".XLSX") {
                         var fichierMod = Path.ChangeExtension(fichier, ".xlsx");
@@ -138,109 +132,188 @@ namespace Excel_extractor {
                     } else if (ext == ".xlsx") {
                         xlWorkbook = xlApp.Workbooks.Open(fichier, objOpt, true, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt, objOpt);
                     }
+                    // fin suppr
 
                     if (xlWorkbook == null) {
                         continue;
                     }
-
-                    xlWorksheet = xlWorkbook.Worksheets["Forecast"];
-                    int yearCol = 0;
+                    bool forecastFound = false;
+                    bool recapFound = false;
+                    foreach (Excel.Worksheet sheet in xlWorkbook.Sheets) {
+                        if (sheet.Name.Equals("Forecast")) {
+                            forecastFound = true;
+                        }
+                        if (sheet.Name.Equals("Forecast")) {
+                            recapFound = true;
+                        }
+                    }
+                    if (forecastFound && recapFound) {
+                        xlWorksheet = xlWorkbook.Worksheets["Forecast"];
+                        xlWorksheetRecap = xlWorkbook.Worksheets["Récap financier"];
+                    } else {
+                        continue;
+                    }
 
                     int nbRow = xlWorksheet.Cells[xlWorksheet.Rows.Count, 2].End(Excel.XlDirection.xlUp).Row;
 
-                    int row1 = 1;
+                    int row1 = 9;
                     string cell1 = "A" + row1.ToString();
                     string cell2 = "AQ" + nbRow.ToString();
                     Excel.Range rng = xlWorksheet.get_Range(cell1, cell2);
                     object[,] cells = (object[,])rng.get_Value(Excel.XlRangeValueDataType.xlRangeValueDefault);
 
+                    row1 = 2;
+                    cell1 = "D" + row1.ToString();
+                    cell2 = "K3";
+                    rng = xlWorksheetRecap.get_Range(cell1, cell2);
+                    object[,] cellsInfo = (object[,])rng.get_Value(Excel.XlRangeValueDataType.xlRangeValueDefault);
+
+                    row1 = 14;
+                    cell1 = "A" + row1.ToString();
+                    cell2 = "N" + row1.ToString();
+                    rng = xlWorksheetRecap.get_Range(cell1, cell2);
+                    object[,] cellsRecap = (object[,])rng.get_Value(Excel.XlRangeValueDataType.xlRangeValueDefault);
+
                     xlWorkbook.Close(false, objOpt, objOpt);
                     xlApp.Quit();
 
-                    for (int i = 1; i < 20; i++) {
-                        if (cells[i, 7] != null && cells[i, 7].ToString() != "") {
-                            yearCol = i + 2;
-                            break;
-                        }
-                    }
-
                     int nbCol = 43;
-                    string projectNumber = cells[1, 2] + "";
-                    string projectName = cells[2, 2] + "";
-                    string metier = "";
+                    string projectNumber = cellsInfo[1, 1] + "";
+                    string projectName = cellsInfo[1, 8] + "";
+                    string metier = cellsInfo[2, 1] + "";
+                    string RP = cellsInfo[2, 8] + "";
                     string resp = "";
+                    string phase = "";
                     string mois_annee = "";
                     string heures = "";
+                    double cout_restime = Convert.ToDouble(cellsRecap[1, 4]);
+                    Debug.WriteLine("cout restime" + cout_restime);
+                    double cout_actuel = Convert.ToDouble(cellsRecap[1, 5]);
+                    double revenus_estimes_total = Convert.ToDouble(cellsRecap[1, 6]);
+                    double fae = Convert.ToDouble(cellsRecap[1, 13]);
+                    string commentaires = cellsRecap[1, 14] + "";
 
-                    for (int i = yearCol + 1; i <= nbRow; i++) {
+                    int yearCol = 1;
+                    for (int i = yearCol + 1; i <= nbRow - 9; i++) {
                         // TODO: Vérifier quelles opérations prennent du temps => optimisation nécessaire car procesus trop long (pour 3 fichiers seulement)
                         // UPDATE: Une lecture au début de la zone intéressante du fichier améliore les perfs un peu 
+                        //Debug.WriteLine(i+", "+cells[i, 2]);
+                        if (cells[i, 2] != null) {
+                            if (!"Code".Equals(cells[i, 2].ToString())) {
+                                string dep = cells[i, 6] + "";
+                                if ("".Equals(dep) || "S Hours".Equals(dep) || dep.Contains("h")) {
+                                    continue;
+                                }
+                                if ((int.Parse(cells[i, 6].ToString())) > 0) {
+                                    metier = cells[i, 2] + "";
+                                    resp = cells[i, 3] + "";
 
-                        if (cells[i, 2] != null && cells[i, 2].ToString() != "Code") {
-                            string dep = cells[i, 6] + "";
-                            if ("".Equals(dep) || "S Hours".Equals(dep) || dep.Contains("h")) {
-                                continue;
-                            }
-                            if ((int.Parse(cells[i, 6].ToString())) > 0) {
-                                metier = cells[i, 2] + "";
-                                resp = cells[i, 3] + "";
-
-                                for (int j = 7; j <= nbCol; j++) {
-                                    if (cells[i, j] != null && (int.Parse(cells[i, j].ToString())) > 0) {
-                                        mois_annee = ((DateTime)cells[yearCol, j]).ToString("MM/dd/yyyy");
-                                        heures = ((double)cells[i, j]).ToString();
-                                        data.Add(new string[] { projectNumber, projectName, "", "", metier, resp, mois_annee, heures });
-                                        total_entries++;
+                                    for (int j = 7; j <= nbCol; j++) {
+                                        if (cells[i, j] != null && (int.Parse(cells[i, j].ToString())) > 0) {
+                                            mois_annee = ((DateTime)cells[yearCol, j]).ToString("MM/dd/yyyy");
+                                            heures = ((double)cells[i, j]).ToString();
+                                            data.Add(new List<string> { projectNumber, projectName, RP, phase, metier, resp, mois_annee, heures, (cout_restime + ""), (revenus_estimes_total + "") });
+                                            total_entries++;
+                                        }
                                     }
                                 }
+                            } else {
+                                phase = cells[i + 1, 1] + "";
                             }
                         }
                     }
+
+                    string honoraires = (revenus_estimes_total / (double)total_entries) + "";
+                    string cout_final = (cout_restime / (double)total_entries) + "";
+                    string cout_actuel_str = (cout_actuel / (double)total_entries) + "";
+                    string fae_str = (fae / (double)total_entries) + "";
+                    foreach (List<string> row in data) {
+                        row.Add(honoraires);
+                        row.Add(cout_final);
+                        row.Add(cout_actuel_str);
+                        row.Add(fae_str);
+                        row.Add(commentaires);
+                    }
+
                 } catch (Exception ex) {
                     Debug.WriteLine(ex);
                     throw new Exception(ex.Message);
                 } finally {
-                    //if (xlWorkbook != null) {
-                    //    xlWorkbook.Close(false, objOpt, objOpt);
-                    //}
-                    //if (xlApp != null) {
-                    //    xlApp.Quit();
-                    //}
-                    Marshal.ReleaseComObject(xlWorksheet);
-                    Marshal.ReleaseComObject(xlWorkbook);
-                    Marshal.ReleaseComObject(xlApp);
+                    if (xlWorksheet != null) {
+                        Marshal.ReleaseComObject(xlWorksheet);
+                    }
+                    if (xlWorkbook != null) {
+                        Marshal.ReleaseComObject(xlWorkbook);
+                    }
+                    if (xlApp != null) {
+                        Marshal.ReleaseComObject(xlApp);
+                    }
                 }
             }
 
             // Effectuer toutes les écritures à la fin
-            object[,] arr = new object[1 + data.Count, 8];
+            object[,] arr = new object[1 + data.Count, headers.Count];
 
             //HEADERS
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < headers.Count; i++) {
                 arr[0, i] = headers[i];
             }
 
+            //foreach (List<string> row in data) {
+            //    foreach(string item in row) {
+            //        Debug.WriteLine(item);
+            //    }
+            //}
+
             //CONTENU
             int counter = 0;
-            foreach (string[] row in data) {
-                for (int i = 0; i < row.Length; i++) {
+            foreach (List<string> row in data) {
+                for (int i = 0; i < row.Count; i++) {
+                    //Debug.WriteLine(row.Count+","+begin_index+counter+","+i);
                     arr[begin_index + counter, i] = row[i];
                 }
                 //arr[begin_index + counter, row.Length-1] = Double.Parse(row[row.Length - 1]);
-                counter++;
+                counter += 1;
             }
 
             Excel.Range c1 = downMLT.Cells[1, 1];
-            Excel.Range c2 = downMLT.Cells[1 + data.Count, 8];
+            Excel.Range c2 = downMLT.Cells[1 + data.Count, headers.Count];
             Excel.Range range = downMLT.get_Range(c1, c2);
             range.Value = arr;
 
             Excel.Range rg = downMLT.Cells[2, 7];
             rg.EntireColumn.NumberFormat = "mmm-yy";
+            rg = downMLT.Cells[2, 9];
+            rg.EntireColumn.NumberFormat = "# ##0.00 €";
+            rg = downMLT.Cells[2, 10];
+            rg.EntireColumn.NumberFormat = "# ##0.00 €";
+            rg = downMLT.Cells[2, 11];
+            rg.EntireColumn.NumberFormat = "# ##0.00 €";
+            rg = downMLT.Cells[2, 12];
+            rg.EntireColumn.NumberFormat = "# ##0.00 €";
+            rg = downMLT.Cells[2, 13];
+            rg.EntireColumn.NumberFormat = "# ##0.00 €";
+            rg = downMLT.Cells[2, 14];
+            rg.EntireColumn.NumberFormat = "# ##0.00 €";
+            // Nécessaire de nommer ?
             downMLT.Name = "down MLT";
 
-            wb.SaveAs(output.Text + "\\MLT.xlsm", Excel.XlFileFormat.xlOpenXMLWorkbookMacroEnabled, objOpt, objOpt, objOpt, objOpt, Excel.XlSaveAsAccessMode.xlNoChange, objOpt, objOpt, objOpt, objOpt, objOpt);
+            var final_output_name = this.output_name.Text;
+            if (this.output_name != null && this.output_name.Equals("")) {
+                final_output_name = "MLT";
+            }
+
+            wb.SaveAs(output.Text + "\\" + final_output_name + ".xlsm", Excel.XlFileFormat.xlOpenXMLWorkbookMacroEnabled, objOpt, objOpt, objOpt, objOpt, Excel.XlSaveAsAccessMode.xlNoChange, objOpt, objOpt, objOpt, objOpt, objOpt);
             System.Windows.MessageBox.Show("Conversion terminée");
+        }
+
+        private void TraiterRFP(string rfp) {
+            string[] metiers = Directory.GetDirectories(rfp);
+            foreach (string metier in metiers) {
+                if (metier != null && !metier.Contains("ARCHIVES") && !metier.Equals("DATA")) {
+                    TraiterMetier(metier);
+                }
+            }
         }
 
         private void TraiterMetier(string metier) {
@@ -282,6 +355,28 @@ namespace Excel_extractor {
             FichierATraiter.Add(files.Last().FullName);
         }
 
+        private void folderType_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) {
+            var comboBox = sender as System.Windows.Controls.ComboBox;
 
+            string value = comboBox.SelectedItem as string;
+            this.selectedFolderType = value;
+            this.Title = "Selected: " + value;
+        }
+
+        private void folderType_Loaded(object sender, RoutedEventArgs e) {
+            List<string> data = new List<string>();
+            data.Add("RFP");
+            data.Add("Métier");
+            data.Add("Responsable");
+            data.Add("Projet");
+
+            var folderType = sender as System.Windows.Controls.ComboBox;
+            folderType.ItemsSource = data;
+            folderType.SelectedIndex = 0;
+        }
+
+        //void worker_ProgressChanged(object sender, ProgressChangedEventArgs e) {
+        //    convert_progress.Value = e.ProgressPercentage;
+        //}
     }
 }
