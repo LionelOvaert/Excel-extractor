@@ -25,7 +25,7 @@ namespace Excel_extractor {
         private Excel.Application app;
         private Excel.Workbook wb;
         private Excel.Worksheet downMLT;
-        private List<string> headers = new List<string> { "Project Number", "Name Project", "RP", "Phase", "Departement", "Resp. tâche", "Month/Year", "Hours", "Coût restimé", "Revenus estimés total", "Honoraires", "Cout final", "Cout actuel", "Fae", "Commentaire" };
+        private List<string> headers = new List<string> { "Project Number", "Name Project", "RP", "Phase", "Departement", "Resp. tâche", "Month/Year", "Hours", "Honoraires", "Cout final", "Cout actuel", "Fae", "Facturation", "Commentaire" };
         private List<List<string>> data = new List<List<string>>();
         private int begin_index = 1;
         private int total_entries = 0;
@@ -191,6 +191,7 @@ namespace Excel_extractor {
                     double cout_actuel = Convert.ToDouble(cellsRecap[1, 5]);
                     double revenus_estimes_total = Convert.ToDouble(cellsRecap[1, 6]);
                     double fae = Convert.ToDouble(cellsRecap[1, 13]);
+                    double facturation = Convert.ToDouble(cellsRecap[1, 7]);
                     string commentaires = cellsRecap[1, 14] + "";
 
                     int yearCol = 1;
@@ -212,7 +213,7 @@ namespace Excel_extractor {
                                         if (cells[i, j] != null && (int.Parse(cells[i, j].ToString())) > 0) {
                                             mois_annee = ((DateTime)cells[yearCol, j]).ToString("MM/dd/yyyy");
                                             heures = ((double)cells[i, j]).ToString();
-                                            data.Add(new List<string> { projectNumber, projectName, RP, phase, metier, resp, mois_annee, heures, (cout_restime + ""), (revenus_estimes_total + "") });
+                                            data.Add(new List<string> { projectNumber, projectName, RP, phase, metier, resp, mois_annee, heures });
                                             total_entries++;
                                         }
                                     }
@@ -222,16 +223,22 @@ namespace Excel_extractor {
                             }
                         }
                     }
-
-                    string honoraires = (revenus_estimes_total / (double)total_entries) + "";
-                    string cout_final = (cout_restime / (double)total_entries) + "";
-                    string cout_actuel_str = (cout_actuel / (double)total_entries) + "";
-                    string fae_str = (fae / (double)total_entries) + "";
+                    Debug.WriteLine(revenus_estimes_total);
+                    Debug.WriteLine((double)total_entries);
+                    Debug.WriteLine(Math.Round(revenus_estimes_total / (double)total_entries, 2, MidpointRounding.AwayFromZero));
+                    Debug.WriteLine(Math.Round(revenus_estimes_total / (double)total_entries, 2, MidpointRounding.AwayFromZero) + "");
+                    Debug.WriteLine("-------------------------");
+                    string honoraires = Math.Round(revenus_estimes_total / (double)total_entries, 2, MidpointRounding.AwayFromZero) + "";
+                    string cout_final = Math.Round(cout_restime / (double)total_entries, 2, MidpointRounding.AwayFromZero) + "";
+                    string cout_actuel_str = Math.Round(cout_actuel / (double)total_entries, 2, MidpointRounding.AwayFromZero) + "";
+                    string fae_str = Math.Round(fae / (double)total_entries, 2, MidpointRounding.AwayFromZero) + "";
+                    string facturation_str = Math.Round(facturation / (double)total_entries, 2, MidpointRounding.AwayFromZero) + "";
                     foreach (List<string> row in data) {
                         row.Add(honoraires);
                         row.Add(cout_final);
                         row.Add(cout_actuel_str);
                         row.Add(fae_str);
+                        row.Add(facturation_str);
                         row.Add(commentaires);
                     }
 
@@ -270,33 +277,36 @@ namespace Excel_extractor {
             foreach (List<string> row in data) {
                 for (int i = 0; i < row.Count; i++) {
                     //Debug.WriteLine(row.Count+","+begin_index+counter+","+i);
-                    arr[begin_index + counter, i] = row[i];
+                    if (i >= 8 && i <= 12) {
+                        arr[begin_index + counter, i] = double.Parse(row[i]);
+                    } else {
+                        arr[begin_index + counter, i] = row[i];
+                    }
                 }
                 //arr[begin_index + counter, row.Length-1] = Double.Parse(row[row.Length - 1]);
                 counter += 1;
             }
+
+            //Excel.Range rg = downMLT.Cells[2, 7];
+            //rg.EntireColumn.NumberFormat = "mmm-yy";
+            downMLT.Range["G2","G"+counter+1].NumberFormat = "mmm-yy";
+            downMLT.Range["I2","I"+counter+1].NumberFormat = "# ##0.00 €";
+            downMLT.Range["J2", "J" + counter+1].NumberFormat = "# ##0.00 €";
+            downMLT.Range["K2", "K" + counter+1].NumberFormat = "# ##0.00 €";
+            downMLT.Range["L2", "L" + counter+1].NumberFormat = "# ##0.00 €";
+            downMLT.Range["M2", "M" + counter+1].NumberFormat = "# ##0.00 €";
+            // Nécessaire de nommer ?
+            downMLT.Name = "down MLT";
 
             Excel.Range c1 = downMLT.Cells[1, 1];
             Excel.Range c2 = downMLT.Cells[1 + data.Count, headers.Count];
             Excel.Range range = downMLT.get_Range(c1, c2);
             range.Value = arr;
 
-            Excel.Range rg = downMLT.Cells[2, 7];
-            rg.EntireColumn.NumberFormat = "mmm-yy";
-            rg = downMLT.Cells[2, 9];
-            rg.EntireColumn.NumberFormat = "# ##0.00 €";
-            rg = downMLT.Cells[2, 10];
-            rg.EntireColumn.NumberFormat = "# ##0.00 €";
-            rg = downMLT.Cells[2, 11];
-            rg.EntireColumn.NumberFormat = "# ##0.00 €";
-            rg = downMLT.Cells[2, 12];
-            rg.EntireColumn.NumberFormat = "# ##0.00 €";
-            rg = downMLT.Cells[2, 13];
-            rg.EntireColumn.NumberFormat = "# ##0.00 €";
-            rg = downMLT.Cells[2, 14];
-            rg.EntireColumn.NumberFormat = "# ##0.00 €";
-            // Nécessaire de nommer ?
-            downMLT.Name = "down MLT";
+            for (int i = 1; i <= headers.Count; i++) {
+                downMLT.Columns[i].AutoFit();
+            }
+
 
             var final_output_name = this.output_name.Text;
             if (this.output_name != null && this.output_name.Equals("")) {
